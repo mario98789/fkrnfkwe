@@ -22,9 +22,15 @@ async def search_via_searcheebot(session_path, keyword_list):
     found_links = set()
     bot = await client.get_entity("@SearcheeBot")
 
+    # Опционально: отправим /start
+    await client.send_message(bot, "/start")
+    await asyncio.sleep(2)
+
     for keyword in keyword_list:
-        st.markdown(f"🔍 <b>Запрос:</b> <code>{keyword}</code>", unsafe_allow_html=True)
-        await client.send_message(bot, keyword)
+        formatted_keyword = f"🔍 {keyword}"
+        st.markdown(f"🔍 <b>Запрос:</b> <code>{formatted_keyword}</code>", unsafe_allow_html=True)
+
+        await client.send_message(bot, formatted_keyword)
         await asyncio.sleep(4)
 
         messages = await client.get_messages(bot, limit=30)
@@ -35,7 +41,7 @@ async def search_via_searcheebot(session_path, keyword_list):
         got_links = False
         for msg in messages:
             if msg.message:
-                st.code(msg.message[:300], language="text")  # показываем часть текста
+                st.code(msg.message[:500], language="text")
                 links = re.findall(r'https://t\.me/[^\s\)]+', msg.message)
                 if links:
                     got_links = True
@@ -44,7 +50,7 @@ async def search_via_searcheebot(session_path, keyword_list):
         if not got_links:
             st.info("ℹ️ Ответ получен, но без ссылок.")
 
-        # Нажимаем "More" несколько раз
+        # Нажимаем "More"
         for i in range(5):
             await client.send_message(bot, "More")
             await asyncio.sleep(3)
