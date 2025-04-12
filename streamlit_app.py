@@ -1,86 +1,97 @@
 import streamlit as st
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.functions.messages import GetHistoryRequest
+from telethon.tl.types import InputPeerUser, PeerUser, PeerChannel
+from telethon.tl.functions.messages import GetHistoryRequest, GetBotCallbackAnswerRequest
 import asyncio
-import re
 import os
+import re
 
-st.set_page_config(page_title="SearcheeBot Парсер", layout="centered")
-st.title("🤖 Поиск Telegram-каналов через @SearcheeBot")
-st.markdown("Загрузи `.session` файл и получи ссылки с бота [@SearcheeBot](https://t.me/SearcheeBot)")
+st.set_page_config(page_title="Парсер @SearcheeBot", layout="centered")
+st.title("🤖 Авто-парсер Telegram-каналов через @SearcheeBot")
+st.markdown("Загрузи `.session` файл — и получи все каналы по кнопке **«Поиск по всем категориям»**")
 
 uploaded_file = st.file_uploader("📂 Загрузите .session файл", type=["session"])
+start = st.button("🚀 Начать выгрузку")
 
-keywords = st.text_area("🗝 Ключевые слова (по одному на строку)", value="эзотерика\nнумерология\nастрология\nнейрографика\nтаро\nматрицы судьбы")
-start = st.button("🚀 Начать поиск")
-
-async def search_via_searcheebot(session_path, keyword_list):
+async def parse_searcheebot(session_path):
     client = TelegramClient(session_path, api_id=12345, api_hash="0123456789abcdef0123456789abcdef")
     await client.start()
-
-    found_links = set()
     bot = await client.get_entity("@SearcheeBot")
 
-    # Опционально: отправим /start
     await client.send_message(bot, "/start")
     await asyncio.sleep(2)
 
-    for keyword in keyword_list:
-        formatted_keyword = f"🔍 {keyword}"
-        st.markdown(f"🔍 <b>Запрос:</b> <code>{formatted_keyword}</code>", unsafe_allow_html=True)
+    # Получаем первое сообщение с кнопками
+    msg = await client.get_messages(bot, limit=1)
+    if not msg or not msg[0].buttons:
+        return []
 
-        await client.send_message(bot, formatted_keyword)
-        await asyncio.sleep(4)
+    # Ищем кнопку "🔍 Поиск по всем категориям"
+    for row in msg[0].buttons:
+        for button in row:
+            if "Поиск по всем категориям" in button.text:
+                await client(GetBotCallbackAnswerRequest(
+                    peer=bot,
+                    msg_id=msg[0].id,
+                    data=button.data
+                ))
+                break
 
-        messages = await client.get_messages(bot, limit=30)
-        if not messages:
-            st.warning("⚠️ Бот не ответил.")
+    await asyncio.sleep(3)
+
+    found_links = set()
+    while True:
+        messages = await client.get_messages(bot, limit=20)
+        new_links = set()
+        for m in messages:
+            if m.message:
+                links = re.findall(r'https://t\.me/[^\s\)]+', m.message)
+                new_links.update(links)
+
+        # Прекращаем, если новых ссылок больше не приходит
+        if not new_links.difference(found_links):
+            break
+
+        found_links.update(new_links)
+
+        # Жмём "More"
+        try:
+            for m in messages:
+                if m.buttons:
+                    for row in m.buttons:
+                        for button in row:
+                            if "More" in button.text:
+                                await client(GetBotCallbackAnswerRequest(
+                                    peer=bot,
+                                    msg_id=m.id,
+                                    data=button.data
+                                ))
+                                await asyncio.sleep(3)
+                                raise Exception("clicked")  # Выход из вложенных циклов
+        except Exception:
             continue
-
-        got_links = False
-        for msg in messages:
-            if msg.message:
-                st.code(msg.message[:500], language="text")
-                links = re.findall(r'https://t\.me/[^\s\)]+', msg.message)
-                if links:
-                    got_links = True
-                    found_links.update(links)
-
-        if not got_links:
-            st.info("ℹ️ Ответ получен, но без ссылок.")
-
-        # Нажимаем "More"
-        for i in range(5):
-            await client.send_message(bot, "More")
-            await asyncio.sleep(3)
-            more_messages = await client.get_messages(bot, limit=20)
-            for msg in more_messages:
-                if msg.message:
-                    links = re.findall(r'https://t\.me/[^\s\)]+', msg.message)
-                    if links:
-                        found_links.update(links)
+        else:
+            break  # если нет кнопки More — выходим
 
     await client.disconnect()
     return sorted(found_links)
 
 if uploaded_file and start:
-    session_name = "user_session"
-    session_path = f"{session_name}.session"
+    session_path = "user_session.session"
     with open(session_path, "wb") as f:
         f.write(uploaded_file.read())
 
-    with st.spinner("🔍 Ищем через @SearcheeBot..."):
+    with st.spinner("⏳ Парсим через @SearcheeBot..."):
         try:
-            kw_list = [k.strip() for k in keywords.splitlines() if k.strip()]
-            links = asyncio.run(search_via_searcheebot(session_name, kw_list))
+            results = asyncio.run(parse_searcheebot(session_path))
 
-            if links:
-                result_text = "\n".join(links)
-                st.success(f"✅ Найдено ссылок: {len(links)}")
-                st.download_button("📥 Скачать результат", data=result_text, file_name="searchee_results.txt")
+            if results:
+                result_text = "\n".join(results)
+                st.success(f"✅ Найдено {len(results)} ссылок.")
+                st.download_button("📥 Скачать .txt", result_text, file_name="searchee_links.txt")
             else:
-                st.info("😕 Бот ответил, но ничего не найдено.")
+                st.info("😕 Ссылок не найдено.")
 
         except Exception as e:
             st.error(f"❌ Ошибка: {e}")
