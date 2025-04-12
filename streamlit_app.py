@@ -1,23 +1,22 @@
+import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import time
+import re
+
+st.set_page_config(page_title="TGStat Парсер", layout="centered")
+st.title("🔍 Парсер Telegram-каналов по тематикам (TGStat.ru)")
+
+keywords_input = st.text_area("🔑 Введите ключевые слова (по одному на строку):", value="эзотерика\nастрология\nнумерология\nтаро\nматрицы судьбы")
+pages = st.slider("📄 Сколько страниц парсить на каждый запрос?", min_value=1, max_value=10, value=3)
+start = st.button("🚀 Начать поиск")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 }
-
 BASE_URL = "https://tgstat.ru/channels/search"
 
-KEYWORDS = [
-    "эзотерика",
-    "астрология",
-    "нумерология",
-    "нейрографика",
-    "таро",
-    "матрицы судьбы"
-]
-
-def parse_tgstat(keyword, pages=5):
+def parse_tgstat(keyword, pages):
     links = set()
     for page in range(1, pages + 1):
         params = {
@@ -27,7 +26,7 @@ def parse_tgstat(keyword, pages=5):
         }
         res = requests.get(BASE_URL, params=params, headers=HEADERS)
         if res.status_code != 200:
-            print(f"❌ Ошибка запроса для {keyword} (страница {page})")
+            st.warning(f"⚠️ Ошибка запроса для: {keyword} (стр. {page})")
             continue
 
         soup = BeautifulSoup(res.text, "html.parser")
@@ -38,22 +37,24 @@ def parse_tgstat(keyword, pages=5):
             if "t.me/" in href:
                 links.add(href.strip())
 
-        print(f"✅ {keyword} | Страница {page} | Найдено: {len(links)}")
         time.sleep(1)
-
     return links
 
-def main():
-    all_links = set()
-    for kw in KEYWORDS:
-        links = parse_tgstat(kw, pages=5)
-        all_links.update(links)
+if start:
+    if not keywords_input.strip():
+        st.warning("⚠️ Введите хотя бы одно ключевое слово.")
+    else:
+        all_links = set()
+        keywords = [k.strip() for k in keywords_input.splitlines() if k.strip()]
+        with st.spinner("🔍 Парсим каналы..."):
+            for kw in keywords:
+                st.text(f"🔎 {kw}")
+                links = parse_tgstat(kw, pages)
+                all_links.update(links)
 
-    with open("tgstat_channels.txt", "w", encoding="utf-8") as f:
-        for link in sorted(all_links):
-            f.write(link + "\n")
-
-    print(f"\n🔗 Всего найдено: {len(all_links)} ссылок")
-
-if __name__ == "__main__":
-    main()
+        if all_links:
+            result_text = "\n".join(sorted(all_links))
+            st.success(f"✅ Найдено ссылок: {len(all_links)}")
+            st.download_button("📥 Скачать .txt", data=result_text, file_name="tgstat_links.txt")
+        else:
+            st.info("😕 Ничего не найдено.")
